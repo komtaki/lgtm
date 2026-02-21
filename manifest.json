@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Praise Cat",
+  "version": "1.0.0",
+  "description": "GitHub PR レビューコメントにエンジニアを褒める猫画像を簡単に貼れる Chrome 拡張",
+  "icons": {
+    "16": "public/icon-16.png",
+    "48": "public/icon-48.png",
+    "128": "public/icon-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://github.com/*"],
+      "js": ["src/content.ts"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["cats/*"],
+      "matches": ["https://github.com/*"]
+    }
+  ]
+}
