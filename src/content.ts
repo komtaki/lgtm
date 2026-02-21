@@ -96,6 +96,19 @@ function insertImage(
   textarea.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+let rafId = 0;
+
+function updatePickerPosition(): void {
+  if (!activePicker || !activeTextarea) return;
+
+  const rect = activeTextarea.getBoundingClientRect();
+  activePicker.style.top = `${rect.bottom + 4}px`;
+  activePicker.style.left = `${rect.left}px`;
+  activePicker.style.width = `${Math.min(rect.width, 480)}px`;
+
+  rafId = requestAnimationFrame(updatePickerPosition);
+}
+
 function showPicker(textarea: HTMLTextAreaElement, filter: string): void {
   closePicker();
 
@@ -103,15 +116,15 @@ function showPicker(textarea: HTMLTextAreaElement, filter: string): void {
   activePicker = picker;
   activeTextarea = textarea;
 
-  const rect = textarea.getBoundingClientRect();
-  picker.style.top = `${rect.bottom + 4}px`;
-  picker.style.left = `${rect.left}px`;
-  picker.style.width = `${Math.min(rect.width, 480)}px`;
-
   document.body.appendChild(picker);
+  updatePickerPosition();
 }
 
 function closePicker(): void {
+  if (rafId) {
+    cancelAnimationFrame(rafId);
+    rafId = 0;
+  }
   if (activePicker) {
     activePicker.remove();
     activePicker = null;
