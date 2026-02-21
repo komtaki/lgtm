@@ -1,24 +1,33 @@
 import { CAT_IMAGES, getGitHubRawUrl, getLocalPreviewUrl } from "./cats";
 import "./content.css";
 
-const BUTTON_CLASS = "praise-cat-btn";
 const PICKER_CLASS = "praise-cat-picker";
+const TRIGGER = "!n";
 
-function createCatButton(): HTMLButtonElement {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = BUTTON_CLASS;
-  btn.textContent = "\uD83D\uDC31";
-  btn.title = "Insert praise cat image";
-  btn.setAttribute("aria-label", "Insert praise cat image");
-  return btn;
-}
+let activePicker: HTMLDivElement | null = null;
+let activeTextarea: HTMLTextAreaElement | null = null;
+let triggerStart = -1;
 
-function createPicker(textarea: HTMLTextAreaElement): HTMLDivElement {
+function createPicker(
+  textarea: HTMLTextAreaElement,
+  filter: string,
+): HTMLDivElement {
   const picker = document.createElement("div");
   picker.className = PICKER_CLASS;
 
-  CAT_IMAGES.forEach((cat) => {
+  const filtered = filter
+    ? CAT_IMAGES.filter((cat) => cat.alt.toLowerCase().includes(filter.toLowerCase()))
+    : CAT_IMAGES;
+
+  if (filtered.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "praise-cat-picker-empty";
+    empty.textContent = "見つかりません";
+    picker.appendChild(empty);
+    return picker;
+  }
+
+  filtered.forEach((cat) => {
     const item = document.createElement("button");
     item.type = "button";
     item.className = "praise-cat-picker-item";
@@ -30,11 +39,16 @@ function createPicker(textarea: HTMLTextAreaElement): HTMLDivElement {
     img.loading = "lazy";
     item.appendChild(img);
 
+    const label = document.createElement("span");
+    label.className = "praise-cat-picker-label";
+    label.textContent = cat.alt;
+    item.appendChild(label);
+
     item.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      insertMarkdown(textarea, cat.file, cat.alt);
-      closePicker(picker);
+      insertImage(textarea, cat.file, cat.alt);
+      closePicker();
     });
 
     picker.appendChild(item);
@@ -43,7 +57,7 @@ function createPicker(textarea: HTMLTextAreaElement): HTMLDivElement {
   return picker;
 }
 
-function insertMarkdown(
+function insertImage(
   textarea: HTMLTextAreaElement,
   file: string,
   alt: string,
@@ -51,88 +65,103 @@ function insertMarkdown(
   const rawUrl = getGitHubRawUrl(file);
   const markdown = `![${alt}](${rawUrl})`;
 
-  const start = textarea.selectionStart;
-  const end = textarea.selectionEnd;
   const value = textarea.value;
+  const cursorPos = textarea.selectionStart;
 
-  // カーソル位置が行頭でなければ改行を挿入
-  const prefix = start > 0 && value[start - 1] !== "\n" ? "\n" : "";
-  const suffix = end < value.length && value[end] !== "\n" ? "\n" : "";
-  const insertion = `${prefix}${markdown}${suffix}`;
+  // トリガー文字列（!n...）を置換
+  const before = value.slice(0, triggerStart);
+  const after = value.slice(cursorPos);
+  textarea.value = before + markdown + after;
 
-  textarea.value = value.slice(0, start) + insertion + value.slice(end);
-
-  // カーソルを挿入テキストの末尾に移動
-  const newPos = start + insertion.length;
+  const newPos = triggerStart + markdown.length;
   textarea.selectionStart = newPos;
   textarea.selectionEnd = newPos;
   textarea.focus();
 
-  // GitHub の状態同期のため input イベントを dispatch
   textarea.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-function closePicker(picker: HTMLDivElement): void {
-  picker.remove();
+function showPicker(textarea: HTMLTextAreaElement, filter: string): void {
+  closePicker();
+
+  const picker = createPicker(textarea, filter);
+  activePicker = picker;
+  activeTextarea = textarea;
+
+  // textarea の下にピッカーを配置
+  const rect = textarea.getBoundingClientRect();
+  picker.style.top = `${window.scrollY + rect.bottom + 4}px`;
+  picker.style.left = `${window.scrollX + rect.left}px`;
+  picker.style.width = `${Math.min(rect.width, 480)}px`;
+
+  document.body.appendChild(picker);
 }
 
-function togglePicker(btn: HTMLButtonElement, textarea: HTMLTextAreaElement): void {
-  const existing = btn.parentElement?.querySelector(`.${PICKER_CLASS}`);
-  if (existing) {
-    existing.remove();
+function closePicker(): void {
+  if (activePicker) {
+    activePicker.remove();
+    activePicker = null;
+    activeTextarea = null;
+    triggerStart = -1;
+  }
+}
+
+function handleInput(e: Event): void {
+  const textarea = e.target as HTMLTextAreaElement;
+  if (!(textarea instanceof HTMLTextAreaElement)) return;
+
+  const value = textarea.value;
+  const cursor = textarea.selectionStart;
+
+  // カーソル前のテキストからトリガーを探す
+  const textBefore = value.slice(0, cursor);
+  const triggerIdx = textBefore.lastIndexOf(TRIGGER);
+
+  if (triggerIdx === -1) {
+    closePicker();
     return;
   }
 
-  // 他のピッカーを閉じる
-  document.querySelectorAll(`.${PICKER_CLASS}`).forEach((el) => el.remove());
+  // トリガーが行頭 or スペース/改行の後にあるか確認
+  if (triggerIdx > 0) {
+    const charBefore = value[triggerIdx - 1];
+    if (charBefore !== " " && charBefore !== "\n" && charBefore !== "\t") {
+      closePicker();
+      return;
+    }
+  }
 
-  const picker = createPicker(textarea);
-  btn.parentElement?.appendChild(picker);
+  // トリガー後のテキスト（検索ワード）にスペースや改行が含まれていないか
+  const query = textBefore.slice(triggerIdx + TRIGGER.length);
+  if (/[\n\r]/.test(query)) {
+    closePicker();
+    return;
+  }
+
+  triggerStart = triggerIdx;
+  showPicker(textarea, query.trim());
 }
 
-function findTextarea(toolbar: Element): HTMLTextAreaElement | null {
-  // markdown-toolbar の親コンテナから textarea を探す
-  const container = toolbar.closest(".js-comment-field-container")
-    ?? toolbar.closest(".comment-form-head")?.parentElement
-    ?? toolbar.parentElement;
-  return container?.querySelector<HTMLTextAreaElement>(
-    "textarea.js-comment-field, textarea[name='comment[body]'], textarea[name='pull_request_review[body]']",
-  ) ?? null;
-}
+function handleKeydown(e: KeyboardEvent): void {
+  if (!activePicker) return;
 
-function injectButton(toolbar: Element): void {
-  if (toolbar.querySelector(`.${BUTTON_CLASS}`)) return;
-
-  const textarea = findTextarea(toolbar);
-  if (!textarea) return;
-
-  const btn = createCatButton();
-  btn.addEventListener("click", (e) => {
+  if (e.key === "Escape") {
     e.preventDefault();
-    e.stopPropagation();
-    togglePicker(btn, textarea);
-  });
-
-  toolbar.appendChild(btn);
+    closePicker();
+  }
 }
 
-function processToolbars(): void {
-  document.querySelectorAll("markdown-toolbar").forEach(injectButton);
-}
+// GitHub の textarea で input イベントを監視
+document.addEventListener("input", handleInput, true);
+document.addEventListener("keydown", handleKeydown, true);
 
 // ピッカー外クリックで閉じる
 document.addEventListener("click", (e) => {
+  if (!activePicker) return;
   const target = e.target as HTMLElement;
-  if (!target.closest(`.${PICKER_CLASS}`) && !target.closest(`.${BUTTON_CLASS}`)) {
-    document.querySelectorAll(`.${PICKER_CLASS}`).forEach((el) => el.remove());
+  if (!target.closest(`.${PICKER_CLASS}`)) {
+    closePicker();
   }
 });
 
-// 初回実行
-processToolbars();
-
-// 動的 DOM 変更に対応
-const observer = new MutationObserver(() => {
-  processToolbars();
-});
-observer.observe(document.body, { childList: true, subtree: true });
+console.debug("[praise-cat] Content script loaded");
