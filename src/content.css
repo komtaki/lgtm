@@ -1,5 +1,5 @@
 .praise-cat-picker {
-  position: absolute;
+  position: fixed;
   z-index: 1000;
   display: grid;
   grid-template-columns: repeat(4, 1fr);

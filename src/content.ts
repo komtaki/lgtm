@@ -8,6 +8,12 @@ let activePicker: HTMLDivElement | null = null;
 let activeTextarea: HTMLTextAreaElement | null = null;
 let triggerStart = -1;
 
+function blockEvent(e: Event): void {
+  e.preventDefault();
+  e.stopPropagation();
+  e.stopImmediatePropagation();
+}
+
 function createPicker(
   textarea: HTMLTextAreaElement,
   filter: string,
@@ -28,10 +34,11 @@ function createPicker(
   }
 
   filtered.forEach((cat) => {
-    const item = document.createElement("button");
-    item.type = "button";
+    const item = document.createElement("div");
     item.className = "praise-cat-picker-item";
     item.title = cat.alt;
+    item.dataset.file = cat.file;
+    item.dataset.alt = cat.alt;
 
     const img = document.createElement("img");
     img.src = getLocalPreviewUrl(cat.file);
@@ -44,15 +51,24 @@ function createPicker(
     label.textContent = cat.alt;
     item.appendChild(label);
 
-    item.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      insertImage(textarea, cat.file, cat.alt);
-      closePicker();
-    });
-
     picker.appendChild(item);
   });
+
+  // mousedown/pointerdown をブロック（フォーカス移動を防止）
+  for (const evt of ["mousedown", "pointerdown"]) {
+    picker.addEventListener(evt, blockEvent, true);
+  }
+
+  // click で選択処理 + 伝播ブロック
+  picker.addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    const item = (e.target as HTMLElement).closest<HTMLElement>(".praise-cat-picker-item");
+    if (item?.dataset.file && item?.dataset.alt) {
+      insertImage(textarea, item.dataset.file, item.dataset.alt);
+      closePicker();
+    }
+  }, true);
 
   return picker;
 }
@@ -68,7 +84,6 @@ function insertImage(
   const value = textarea.value;
   const cursorPos = textarea.selectionStart;
 
-  // トリガー文字列（!n...）を置換
   const before = value.slice(0, triggerStart);
   const after = value.slice(cursorPos);
   textarea.value = before + markdown + after;
@@ -88,10 +103,9 @@ function showPicker(textarea: HTMLTextAreaElement, filter: string): void {
   activePicker = picker;
   activeTextarea = textarea;
 
-  // textarea の下にピッカーを配置
   const rect = textarea.getBoundingClientRect();
-  picker.style.top = `${window.scrollY + rect.bottom + 4}px`;
-  picker.style.left = `${window.scrollX + rect.left}px`;
+  picker.style.top = `${rect.bottom + 4}px`;
+  picker.style.left = `${rect.left}px`;
   picker.style.width = `${Math.min(rect.width, 480)}px`;
 
   document.body.appendChild(picker);
@@ -113,7 +127,6 @@ function handleInput(e: Event): void {
   const value = textarea.value;
   const cursor = textarea.selectionStart;
 
-  // カーソル前のテキストからトリガーを探す
   const textBefore = value.slice(0, cursor);
   const triggerIdx = textBefore.lastIndexOf(TRIGGER);
 
@@ -122,7 +135,6 @@ function handleInput(e: Event): void {
     return;
   }
 
-  // トリガーが行頭 or スペース/改行の後にあるか確認
   if (triggerIdx > 0) {
     const charBefore = value[triggerIdx - 1];
     if (charBefore !== " " && charBefore !== "\n" && charBefore !== "\t") {
@@ -131,7 +143,6 @@ function handleInput(e: Event): void {
     }
   }
 
-  // トリガー後のテキスト（検索ワード）にスペースや改行が含まれていないか
   const query = textBefore.slice(triggerIdx + TRIGGER.length);
   if (/[\n\r]/.test(query)) {
     closePicker();
@@ -151,11 +162,9 @@ function handleKeydown(e: KeyboardEvent): void {
   }
 }
 
-// GitHub の textarea で input イベントを監視
 document.addEventListener("input", handleInput, true);
 document.addEventListener("keydown", handleKeydown, true);
 
-// ピッカー外クリックで閉じる
 document.addEventListener("click", (e) => {
   if (!activePicker) return;
   const target = e.target as HTMLElement;
